@@ -130,6 +130,17 @@ export async function pingSheet() {
  */
 export async function recordAttendance({ id, source = 'camera', timestamp = new Date().toISOString() }) {
   const cleanId = String(id).trim().toUpperCase();
+
+  // VALIDATION: Reject any Roll No with less than 7 characters/digits
+  if (!cleanId || cleanId.length < 7) {
+    return {
+      success: false,
+      status: 'INVALID_LENGTH',
+      message: `Roll No "${cleanId}" is invalid! Must be at least 7 digits (got ${cleanId.length}).`,
+      data: { id: cleanId }
+    };
+  }
+
   const localLedger = getLocalLedger();
 
   const standardItem = {

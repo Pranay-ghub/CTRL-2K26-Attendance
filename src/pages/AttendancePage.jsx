@@ -109,6 +109,29 @@ export function AttendancePage() {
    * Core Handler: Process Scanned or Manually Submitted ID
    */
   const processAttendanceId = useCallback(async (cleanId, source = 'camera') => {
+    const rawClean = String(cleanId || '').trim().toUpperCase();
+
+    // 1. Strict Validation: Roll Number MUST be at least 7 characters/digits
+    if (!rawClean || rawClean.length < 7) {
+      soundService.playError();
+      setToast({
+        type: 'ERROR',
+        id: rawClean || 'TOO_SHORT',
+        title: 'REJECTED: < 7 DIGITS',
+        message: `Roll No "${rawClean}" is only ${rawClean.length} digits. Minimum 7 digits required!`,
+        duration: 4500
+      });
+
+      setLastScan({
+        id: rawClean || 'TOO_SHORT',
+        timestamp: new Date().toISOString(),
+        status: 'ERROR',
+        source: source,
+        errorMessage: `Rejected: Roll No has only ${rawClean.length} digits (7 minimum required)`
+      });
+      return;
+    }
+
     const clientTimestamp = new Date().toISOString();
 
     // Record timestamp for velocity rate
@@ -117,17 +140,18 @@ export function AttendancePage() {
 
     // Call sheets API service
     const result = await recordAttendance({
-      id: cleanId,
+      id: rawClean,
       source,
       timestamp: clientTimestamp
     });
 
     const scanRecord = {
-      id: cleanId,
+      id: rawClean,
       timestamp: clientTimestamp,
       status: result.status,
       source: source,
-      firstScannedAt: result.firstScannedAt || null
+      firstScannedAt: result.firstScannedAt || null,
+      errorMessage: result.message
     };
 
     setLastScan(scanRecord);
@@ -137,7 +161,7 @@ export function AttendancePage() {
       soundService.playSuccess();
       setToast({
         type: 'SUCCESS',
-        id: cleanId,
+        id: rawClean,
         title: 'ATTENDANCE LOGGED',
         message: result.message || 'Successfully recorded in Google Sheets.',
         duration: 3000
@@ -146,7 +170,7 @@ export function AttendancePage() {
       soundService.playDuplicate();
       setToast({
         type: 'DUPLICATE',
-        id: cleanId,
+        id: rawClean,
         title: 'DUPLICATE BLOCKED',
         message: result.message || 'Already checked in earlier today.',
         extra: result.firstScannedAt ? `First entry: ${result.firstScannedAt}` : null,
@@ -156,7 +180,7 @@ export function AttendancePage() {
       soundService.playSuccess();
       setToast({
         type: 'QUEUED_OFFLINE',
-        id: cleanId,
+        id: rawClean,
         title: 'SAVED OFFLINE',
         message: 'No connection to Sheets. Scan stored in offline queue.',
         duration: 3500
@@ -165,7 +189,7 @@ export function AttendancePage() {
       soundService.playError();
       setToast({
         type: 'ERROR',
-        id: cleanId,
+        id: rawClean,
         title: 'RECORDING ERROR',
         message: result.message || 'Could not log attendance.',
         duration: 4000

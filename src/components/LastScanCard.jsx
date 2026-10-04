@@ -18,8 +18,8 @@ export function LastScanCard({ lastScan }) {
           &gt; Sensor idle. Bring student ID or event badge into camera frame.
         </div>
         <div className="mt-3 flex items-center gap-2">
-          <span className="text-[11px] font-mono text-slate-500 bg-slate-900/60 px-2 py-0.5 rounded border border-slate-800">
-            AUTO-DECODE ENABLED
+          <span className="text-[11px] font-mono text-cyan-400/80 bg-slate-900/60 px-2 py-0.5 rounded border border-cyan-500/20">
+            MIN 7 DIGITS REQUIRED
           </span>
         </div>
       </div>
@@ -29,7 +29,7 @@ export function LastScanCard({ lastScan }) {
   const isSuccess = lastScan.status === 'SUCCESS';
   const isDuplicate = lastScan.status === 'DUPLICATE';
   const isQueued = lastScan.status === 'QUEUED_OFFLINE';
-  const isError = lastScan.status === 'ERROR';
+  const isError = lastScan.status === 'ERROR' || lastScan.status === 'INVALID_LENGTH';
 
   const badgeConfig = {
     SUCCESS: {
@@ -62,11 +62,19 @@ export function LastScanCard({ lastScan }) {
       text: 'text-red-400',
       shadow: 'shadow-[0_0_15px_rgba(255,51,68,0.25)]',
       icon: <XCircle className="w-4 h-4 text-red-400" />,
-      label: 'SCAN ERROR'
+      label: lastScan.id.length < 7 ? 'REJECTED (< 7 DIGITS)' : 'SCAN ERROR'
+    },
+    INVALID_LENGTH: {
+      border: 'border-red-500/40',
+      bg: 'bg-red-950/30',
+      text: 'text-red-400',
+      shadow: 'shadow-[0_0_15px_rgba(255,51,68,0.25)]',
+      icon: <XCircle className="w-4 h-4 text-red-400" />,
+      label: 'REJECTED (< 7 DIGITS)'
     }
   };
 
-  const badge = badgeConfig[lastScan.status] || badgeConfig.SUCCESS;
+  const badge = badgeConfig[lastScan.status] || badgeConfig.ERROR;
 
   return (
     <div className={`rounded-2xl glass-panel border p-4 sm:p-5 relative overflow-hidden transition-all duration-300 ${badge.border} ${badge.shadow}`}>
@@ -90,10 +98,19 @@ export function LastScanCard({ lastScan }) {
 
       {/* Main Scanned ID Display */}
       <div className="my-2">
-        <div className="font-mono text-2xl sm:text-3xl font-extrabold tracking-wider text-white select-all break-all text-glow-cyan">
+        <div className={`font-mono text-2xl sm:text-3xl font-extrabold tracking-wider select-all break-all ${
+          isError ? 'text-red-400' : isDuplicate ? 'text-amber-300' : 'text-white text-glow-cyan'
+        }`}>
           {lastScan.id}
         </div>
       </div>
+
+      {/* Error message detail if rejected */}
+      {lastScan.errorMessage && (
+        <div className="text-xs font-mono text-red-400 mb-2">
+          &gt; {lastScan.errorMessage}
+        </div>
+      )}
 
       {/* Timestamp and Details */}
       <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800/80 text-xs font-mono text-slate-400">
@@ -109,6 +126,13 @@ export function LastScanCard({ lastScan }) {
           {lastScan.firstScannedAt && (
             <span className="text-[10px] text-amber-400" title={`First scanned: ${lastScan.firstScannedAt}`}>
               PRIOR ENTRY FOUND
+            </span>
+          )}
+          {lastScan.id && (
+            <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+              lastScan.id.length >= 7 ? 'text-emerald-400 bg-emerald-950/40' : 'text-red-400 bg-red-950/40'
+            }`}>
+              {lastScan.id.length} digits
             </span>
           )}
         </div>
