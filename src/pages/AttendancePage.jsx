@@ -6,7 +6,6 @@ import { StatsGrid } from '../components/StatsGrid';
 import { LiveLog } from '../components/LiveLog';
 import { ManualEntryFallback } from '../components/ManualEntryFallback';
 import { Toast } from '../components/Toast';
-import { PinModal } from '../components/PinModal';
 import { useScanner } from '../hooks/useScanner';
 import { useWakeLock } from '../hooks/useWakeLock';
 import { soundService } from '../services/sound';
@@ -14,13 +13,6 @@ import { recordAttendance, fetchStatsAndLogs, syncOfflineQueue } from '../servic
 import { offlineQueue } from '../services/offlineQueue';
 
 export function AttendancePage() {
-  const accessPin = import.meta.env.VITE_ACCESS_PIN || '';
-  const [pinUnlocked, setPinUnlocked] = useState(() => {
-    // If no pin configured or already verified this session
-    if (!accessPin) return true;
-    return sessionStorage.getItem('ctrl_pin_verified') === 'true';
-  });
-
   // State
   const [lastScan, setLastScan] = useState(null);
   const [toast, setToast] = useState(null);
@@ -239,15 +231,6 @@ export function AttendancePage() {
       
       {/* Toast notifications */}
       <Toast toast={toast} onDismiss={() => setToast(null)} />
-
-      {/* Optional PIN Gate Modal */}
-      {!pinUnlocked && accessPin && (
-        <PinModal
-          requiredPin={accessPin}
-          onSuccess={() => setPinUnlocked(true)}
-          onCancel={() => window.history.back()}
-        />
-      )}
 
       {/* Header Bar */}
       <HeaderBar
