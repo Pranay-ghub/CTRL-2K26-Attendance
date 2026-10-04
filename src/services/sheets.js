@@ -19,7 +19,7 @@ export function isSheetDB() {
   return API_URL.includes('sheetdb.io');
 }
 
-function getLocalLedger() {
+export function getLocalLedger() {
   try {
     const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
     return raw ? JSON.parse(raw) : [];
@@ -28,29 +28,56 @@ function getLocalLedger() {
   }
 }
 
-function saveLocalLedger(ledger) {
+export function saveLocalLedger(ledger) {
   try {
     localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(ledger));
   } catch (e) {}
 }
 
+export function clearLocalLedger() {
+  try {
+    localStorage.removeItem(LOCAL_STORAGE_KEY);
+  } catch (e) {}
+}
+
 /**
- * Extracts Roll No / ID from any row object (supports various column naming styles)
+ * Extracts Roll No / ID from any row object (case-insensitive & flexible header format)
  */
-function extractRowId(row) {
+export function extractRowId(row) {
   if (!row || typeof row !== 'object') return '';
-  return String(
+  
+  // 1. Direct common keys
+  const direct = 
+    row['roll no'] ||
     row['Roll No'] ||
     row['RollNo'] ||
+    row['rollno'] ||
     row['roll_no'] ||
     row['Roll_No'] ||
-    row['ID'] ||
-    row['Barcode'] ||
     row['id'] ||
+    row['ID'] ||
     row['barcode'] ||
-    Object.values(row)[0] ||
-    ''
-  ).trim().toUpperCase();
+    row['Barcode'] ||
+    row.id;
+  
+  if (direct) return String(direct).trim().toUpperCase();
+
+  // 2. Case-insensitive normalization over all row keys
+  for (const k of Object.keys(row)) {
+    const norm = k.trim().toLowerCase().replace(/[-_ ]/g, '');
+    if (norm === 'rollno' || norm === 'roll' || norm === 'id' || norm === 'barcode' || norm === 'studentid') {
+      if (row[k]) return String(row[k]).trim().toUpperCase();
+    }
+  }
+
+  // 3. Fallback to first non-empty value
+  for (const val of Object.values(row)) {
+    if (val && typeof val === 'string' && val.trim().length > 0) {
+      return String(val).trim().toUpperCase();
+    }
+  }
+
+  return '';
 }
 
 /**
@@ -83,7 +110,7 @@ export async function pingSheet() {
         return { 
           connected: true, 
           status: 'EMPTY_SHEET',
-          message: 'SheetDB connected! (Add "Roll No" in Row 1 of your Google Sheet)'
+          message: 'SheetDB connected! (Add "roll no" in Row 1 of your Google Sheet)'
         };
       }
       return { connected: true, status: 'CONNECTED', data };
@@ -105,28 +132,23 @@ export async function recordAttendance({ id, source = 'camera', timestamp = new 
   const cleanId = String(id).trim().toUpperCase();
   const localLedger = getLocalLedger();
 
-  // Instant local duplicate check against cached entries
-  const existingLocal = localLedger.find(item => extractRowId(item) === cleanId || item.id === cleanId);
-  if (existingLocal) {
-    return {
-      success: false,
-      status: 'DUPLICATE',
-      message: `Roll No ${cleanId} already checked in.`,
-      firstScannedAt: existingLocal.timestamp || existingLocal['Timestamp'] || 'Earlier today',
-      data: { id: cleanId }
-    };
-  }
-
   const standardItem = {
     id: cleanId,
+    'roll no': cleanId,
     'Roll No': cleanId,
     'RollNo': cleanId,
     'roll_no': cleanId,
+    'id': cleanId,
     'ID': cleanId,
+    'barcode': cleanId,
     'Barcode': cleanId,
+    'timestamp': timestamp,
     'Timestamp': timestamp,
+    'event': EVENT_NAME,
     'Event': EVENT_NAME,
+    'status': 'PRESENT',
     'Status': 'PRESENT',
+    'device': source,
     'Device': source,
     timestamp,
     source,
@@ -136,6 +158,16 @@ export async function recordAttendance({ id, source = 'camera', timestamp = new 
 
   // If device is offline, enqueue immediately
   if (!navigator.onLine) {
+    const existingLocal = localLedger.find(item => extractRowId(item) === cleanId);
+    if (existingLocal) {
+      return {
+        success: false,
+        status: 'DUPLICATE',
+        message: `Roll No ${cleanId} already saved in offline queue.`,
+        firstScannedAt: existingLocal.timestamp || 'Earlier today',
+        data: { id: cleanId }
+      };
+    }
     offlineQueue.enqueue(standardItem);
     localLedger.push({ ...standardItem, status: 'QUEUED_OFFLINE' });
     saveLocalLedger(localLedger);
@@ -150,6 +182,16 @@ export async function recordAttendance({ id, source = 'camera', timestamp = new 
 
   // If no API URL is configured, use local mock ledger
   if (!API_URL) {
+    const existingLocal = localLedger.find(item => extractRowId(item) === cleanId);
+    if (existingLocal) {
+      return {
+        success: false,
+        status: 'DUPLICATE',
+        message: `Roll No ${cleanId} already checked in (Local Mock).`,
+        firstScannedAt: existingLocal.timestamp || 'Earlier today',
+        data: { id: cleanId }
+      };
+    }
     localLedger.push(standardItem);
     saveLocalLedger(localLedger);
     return {
@@ -164,9 +206,11 @@ export async function recordAttendance({ id, source = 'camera', timestamp = new 
   // --- SHEETDB.IO API INTEGRATION ---
   if (isSheetDB()) {
     try {
-      // 1. Double check duplicate from SheetDB search
+      console.log(`[SheetDB] Initiating scan submission for: ${cleanId}`);
+
+      // 1. Live duplicate check directly against SheetDB search
       try {
-        const searchRes = await fetch(`${API_URL}/search?Roll%20No=${encodeURIComponent(cleanId)}&casesensitive=false`, {
+        const searchRes = await fetch(`${API_URL}/search?roll%20no=${encodeURIComponent(cleanId)}&casesensitive=false`, {
           method: 'GET',
           headers: { 'Accept': 'application/json' }
         });
@@ -174,36 +218,48 @@ export async function recordAttendance({ id, source = 'camera', timestamp = new 
           const searchData = await searchRes.json();
           if (Array.isArray(searchData) && searchData.length > 0) {
             const first = searchData[0];
+            const firstTime = first.timestamp || first['timestamp'] || first['Timestamp'] || 'Earlier today';
+            console.log(`[SheetDB] Duplicate detected for: ${cleanId}`);
             return {
               success: false,
               status: 'DUPLICATE',
               message: `Roll No ${cleanId} already recorded in Google Sheet.`,
-              firstScannedAt: first['Timestamp'] || first.timestamp || 'Earlier',
+              firstScannedAt: firstTime,
               data: { id: cleanId }
             };
           }
         }
       } catch (searchErr) {
-        // If search fails, proceed to insert (will still be guarded by local ledger)
+        console.warn('[SheetDB] Search pre-check skipped:', searchErr);
       }
 
       // 2. Insert into SheetDB
+      // Sending both lowercase and capitalized keys ensures SheetDB matches user's column headers
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 8000);
+      const timeoutId = setTimeout(() => controller.abort(), 9000);
 
       const postBody = {
         data: [
           {
+            "roll no": cleanId,
             "Roll No": cleanId,
             "RollNo": cleanId,
+            "roll_no": cleanId,
+            "id": cleanId,
             "ID": cleanId,
+            "timestamp": timestamp,
             "Timestamp": timestamp,
+            "event": EVENT_NAME,
             "Event": EVENT_NAME,
+            "status": "PRESENT",
             "Status": "PRESENT",
+            "device": source,
             "Device": source
           }
         ]
       };
+
+      console.log('[SheetDB] Sending POST to:', API_URL, postBody);
 
       const res = await fetch(API_URL, {
         method: 'POST',
@@ -223,9 +279,10 @@ export async function recordAttendance({ id, source = 'camera', timestamp = new 
         resJson = JSON.parse(resText);
       } catch (e) {}
 
+      console.log('[SheetDB] Server Response:', res.status, resJson);
+
       // Check if SheetDB indicates row 1 is empty
       if (resJson && resJson.error && String(resJson.error).includes('Spreadsheet is empty')) {
-        // Save locally so the volunteer's scan isn't lost
         localLedger.push(standardItem);
         saveLocalLedger(localLedger);
         offlineQueue.enqueue(standardItem);
@@ -233,19 +290,20 @@ export async function recordAttendance({ id, source = 'camera', timestamp = new 
         return {
           success: true,
           status: 'QUEUED_OFFLINE',
-          message: 'Saved locally! Please add "Roll No" in Row 1 of your Google Sheet.',
+          message: 'Saved locally! Please add "roll no" in Row 1 of your Google Sheet.',
           data: standardItem
         };
       }
 
       if (res.ok || res.status === 201 || (resJson && resJson.created)) {
+        // Save to local cache
         localLedger.push(standardItem);
         saveLocalLedger(localLedger);
 
         return {
           success: true,
           status: 'SUCCESS',
-          message: `Roll No ${cleanId} recorded in Google Sheets via SheetDB!`,
+          message: `Roll No ${cleanId} stored in Google Sheet!`,
           data: standardItem
         };
       }
@@ -253,7 +311,7 @@ export async function recordAttendance({ id, source = 'camera', timestamp = new 
       throw new Error(resJson.error || resJson.message || `HTTP ${res.status}`);
 
     } catch (networkErr) {
-      console.warn('SheetDB network error, enqueuing offline:', networkErr);
+      console.error('[SheetDB] Error communicating with SheetDB:', networkErr);
       offlineQueue.enqueue(standardItem);
       localLedger.push({ ...standardItem, status: 'QUEUED_OFFLINE' });
       saveLocalLedger(localLedger);
@@ -331,7 +389,7 @@ export async function fetchStatsAndLogs() {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 7000);
 
-      const fetchUrl = isSheetDB() ? API_URL : `${API_URL}?action=stats&_t=${Date.now()}`;
+      const fetchUrl = isSheetDB() ? `${API_URL}?_t=${Date.now()}` : `${API_URL}?action=stats&_t=${Date.now()}`;
       const res = await fetch(fetchUrl, {
         method: 'GET',
         headers: { 'Accept': 'application/json' },
@@ -342,7 +400,7 @@ export async function fetchStatsAndLogs() {
       if (res.ok) {
         const data = await res.json();
 
-        // SheetDB returns array of rows: [ { "Roll No": "...", ... }, ... ]
+        // SheetDB returns array of rows: [ { "roll no": "...", ... }, ... ]
         if (Array.isArray(data)) {
           const uniqueSet = new Set();
           const parsedEntries = [];
@@ -353,22 +411,16 @@ export async function fetchStatsAndLogs() {
               uniqueSet.add(rowId);
               parsedEntries.push({
                 id: rowId,
-                timestamp: row['Timestamp'] || row.timestamp || new Date().toISOString(),
-                event: row['Event'] || row.event || EVENT_NAME,
-                status: row['Status'] || row.status || 'PRESENT',
-                source: row['Device'] || row.device || row.source || 'camera'
+                timestamp: row['timestamp'] || row['Timestamp'] || row['Time'] || new Date().toISOString(),
+                event: row['event'] || row['Event'] || EVENT_NAME,
+                status: row['status'] || row['Status'] || 'PRESENT',
+                source: row['device'] || row['Device'] || row['source'] || 'camera'
               });
             }
           }
 
-          // Merge local un-synced entries if any
-          for (const item of localLedger) {
-            const itemClean = extractRowId(item) || item.id;
-            if (itemClean && !uniqueSet.has(itemClean)) {
-              uniqueSet.add(itemClean);
-              parsedEntries.push(item);
-            }
-          }
+          // Update local ledger with verified SheetDB rows
+          saveLocalLedger(parsedEntries);
 
           const total = parsedEntries.length;
           const duplicates = Math.max(0, total - uniqueSet.size);
@@ -385,7 +437,7 @@ export async function fetchStatsAndLogs() {
         }
 
         // Apps Script format
-        if (data.success) {
+        if (data && data.success) {
           return {
             totalScanned: data.totalScans || 0,
             uniqueStudents: data.uniqueStudents || 0,
@@ -449,13 +501,13 @@ export async function syncOfflineQueue() {
           body: JSON.stringify({
             data: [
               {
+                "roll no": cleanId,
                 "Roll No": cleanId,
                 "RollNo": cleanId,
-                "ID": cleanId,
-                "Timestamp": item.timestamp || new Date().toISOString(),
-                "Event": EVENT_NAME,
-                "Status": "PRESENT",
-                "Device": item.source || 'camera'
+                "timestamp": item.timestamp || new Date().toISOString(),
+                "event": EVENT_NAME,
+                "status": "PRESENT",
+                "device": item.source || 'camera'
               }
             ]
           })
