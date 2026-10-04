@@ -8,7 +8,10 @@ A mobile-first, high-speed attendance scanner web application built with **Vite*
 
 - **High-Speed Multi-Format Decode**: Powered by `html5-qrcode` with continuous autofocus, 15 FPS sampling, and rectangular 1D-optimized viewfinder.
   - Supports: `CODE_128`, `CODE_39`, `EAN_13`, `EAN_8`, `UPC_A`, `ITF`, `CODABAR`, `QR_CODE`.
-- **Zero-Secret Frontend Backend**: Communicates directly with Google Apps Script Web App (`doPost` / `doGet`) via `Content-Type: text/plain;charset=utf-8` to prevent CORS preflight obstacles.
+- **Zero-Secret Backend with SheetDB or Google Apps Script**:
+  - Direct integration with **SheetDB API** (`https://sheetdb.io/api/v1/lsdlngjlrkqbd`) and Google Apps Script Web App.
+  - Multi-header normalization: automatically maps student ID to `Roll No`, `RollNo`, `ID`, and `Barcode`.
+  - CORS enabled with full browser fetch compatibility.
 - **Race-Condition-Proof Concurrent Scanning**: Uses Google Apps Script's `LockService` to serialize multi-volunteer simultaneous check-ins.
 - **Automated Duplicate Prevention**: Rejects duplicate student IDs with sound, haptics, and visual alerts, citing the first check-in timestamp.
 - **Offline Resiliency & Sync Queue**: Automatically caches scans in `localStorage` when network connectivity drops or times out, auto-syncing when back online.

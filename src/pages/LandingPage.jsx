@@ -52,10 +52,14 @@ export function LandingPage() {
       setCameraStatus({ label: 'OFFLINE', status: 'offline' });
     }
 
-    // 2. Google Sheet Web App Ping
+    // 2. Google Sheet / SheetDB Ping
     pingSheet().then(res => {
       if (res.connected) {
-        setSheetStatus({ label: 'CONNECTED', status: 'online' });
+        if (res.status === 'EMPTY_SHEET') {
+          setSheetStatus({ label: 'CONNECTED (ADD HEADERS)', status: 'warning' });
+        } else {
+          setSheetStatus({ label: 'CONNECTED (SHEETDB)', status: 'online' });
+        }
       } else if (res.mode === 'STANDBY_MOCK') {
         setSheetStatus({ label: 'STANDBY (LOCAL)', status: 'neutral' });
       } else {
